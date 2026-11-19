@@ -1,0 +1,152 @@
+package com.pova.launcher
+
+import android.content.Context
+import android.content.pm.ResolveInfo
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.drawable.AdaptiveIconDrawable
+import android.graphics.drawable.Drawable
+import android.view.MotionEvent
+import android.view.View
+import android.widget.HorizontalScrollView
+
+/** يرسم كل أيقونة بشكل iOS (مربع بزوايا ناعمة) من أيقونة التطبيق نفسه. */
+object IconMaker {
+    private val cache = HashMap<String, Bitmap>()
+    private const val SIZE = 192
+
+    fun get(ctx: Context, info: ResolveInfo, pkg: String): Bitmap {
+        val hit = cache[pkg]
+        if (hit != null) return hit
+
+        val bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val s = SIZE.toFloat()
+        val r = s * 0.2237f
+        val clip = Path()
+        clip.addRoundRect(RectF(0f, 0f, s, s), r, r, Path.Direction.CW)
+        c.clipPath(clip)
+
+        val d: Drawable? = try {
+            info.loadIcon(ctx.packageManager)
+        } catch (e: Exception) {
+            null
+        }
+
+        if (d is AdaptiveIconDrawable) {
+            val big = (SIZE * 1.5f).toInt()
+            val off = (SIZE - big) / 2
+            val bg = d.background
+            val fg = d.foreground
+            if (bg != null) {
+                bg.setBounds(off, off, off + big, off + big)
+                bg.draw(c)
+            } else {
+                c.drawColor(Color.WHITE)
+            }
+            if (fg != null) {
+                fg.setBounds(off, off, off + big, off + big)
+                fg.draw(c)
+            }
+        } else if (d != null) {
+            c.drawColor(Color.WHITE)
+            val pad = (SIZE * 0.14f).toInt()
+            d.setBounds(pad, pad, SIZE - pad, SIZE - pad)
+            d.draw(c)
+        } else {
+            c.drawColor(Color.DKGRAY)
+        }
+
+        cache[pkg] = bmp
+        return bmp
+    }
+}
+
+/** حلقة تقدّم للودجت. */
+class RingView(ctx: Context) : View(ctx) {
+    var progress = 0
+    var ringColor = Color.parseColor("#30D158")
+
+    private val track = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val arc = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rect = RectF()
+
+    init {
+        track.style = Paint.Style.STROKE
+        track.color = Color.argb(60, 255, 255, 255)
+        arc.style = Paint.Style.STROKE
+        arc.strokeCap = Paint.Cap.ROUND
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val sw = width * 0.12f
+        track.strokeWidth = sw
+        arc.strokeWidth = sw
+        arc.color = ringColor
+        val inset = sw / 2f + 1f
+        rect.set(inset, inset, width - inset, height - inset)
+        canvas.drawOval(rect, track)
+        canvas.drawArc(rect, -90f, 360f * progress / 100f, false, arc)
+    }
+}
+
+/** صفحات أفقية تثبت عند كل صفحة مثل iOS. */
+class Pager(ctx: Context) : HorizontalScrollView(ctx) {
+    var startX = 0
+    var onSettle: ((Int) -> Unit)? = null
+    var onScroll: ((Int) -> Unit)? = null
+
+    init {
+        isHorizontalScrollBarEnabled = false
+        overScrollMode = View.OVER_SCROLL_NEVER
+    }
+
+    override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
+        super.onScrollChanged(l, t, oldl, oldt)
+        onScroll?.invoke(l)
+    }
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            startX = scrollX
+        }
+        return super.onInterceptTouchEvent(ev)
+    }
+
+    override fun onTouchEvent(ev: MotionEvent): Boolean {
+        val a = ev.actionMasked
+        if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) {
+            super.onTouchEvent(ev)
+            snapFrom(startX)
+            return true
+        }
+        return super.onTouchEvent(ev)
+    }
+
+    private fun snapFrom(from: Int) {
+        val w = width
+        if (w <= 0) return
+        val child = getChildAt(0) ?: return
+        val maxPage = (child.width / w) - 1
+        val start = Math.round(from.toFloat() / w)
+        val d = scrollX - from
+        var page = start
+        if (d > w / 7) {
+            page = start + 1
+        } else if (d < -w / 7) {
+            page = start - 1
+        }
+        page = page.coerceIn(0, maxOf(0, maxPage))
+        smoothScrollTo(page * w, 0)
+        onSettle?.invoke(page)
+    }
+
+    fun goTo(page: Int) {
+        smoothScrollTo(page * width, 0)
+        onSettle?.invoke(page)
+    }
+}

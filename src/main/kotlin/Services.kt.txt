@@ -1,0 +1,63 @@
+package com.pova.launcher
+
+import android.accessibilityservice.AccessibilityService
+import android.content.Intent
+import android.os.Handler
+import android.os.Looper
+import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
+import android.view.accessibility.AccessibilityEvent
+
+class LockService : AccessibilityService() {
+    companion object {
+        @Volatile
+        var instance: LockService? = null
+    }
+
+    override fun onServiceConnected() {
+        instance = this
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        instance = null
+        return super.onUnbind(intent)
+    }
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+
+    override fun onInterrupt() {}
+}
+
+class NotifService : NotificationListenerService() {
+    companion object {
+        @Volatile
+        var counts: Map<String, Int> = emptyMap()
+
+        @Volatile
+        var onChange: (() -> Unit)? = null
+    }
+
+    private fun refresh() {
+        counts = try {
+            activeNotifications.toList()
+                .filter { it.isClearable }
+                .groupingBy { it.packageName }
+                .eachCount()
+        } catch (e: Exception) {
+            emptyMap()
+        }
+        Handler(Looper.getMainLooper()).post { onChange?.invoke() }
+    }
+
+    override fun onListenerConnected() {
+        refresh()
+    }
+
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        refresh()
+    }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        refresh()
+    }
+}
